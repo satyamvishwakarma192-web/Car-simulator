@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Anthropic Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--color-background-tertiary);
+}
+
+#gameContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  max-width: 100%;
+}
+
+#canvas {
+  background: linear-gradient(135deg, #1a472a 0%, #2d5a3d 50%, #1a472a 100%);
+  border: 2px solid var(--color-border-secondary);
+  border-radius: var(--border-radius-lg);
+  display: block;
+  width: 100%;
+  max-width: 680px;
+  height: auto;
+  cursor: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+#hud {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.stat-card {
+  background: var(--color-background-secondary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--border-radius-md);
+  padding: 12px;
+  text-align: center;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.stat-unit {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-left: 4px;
+}
+
+#controls {
+  background: var(--color-background-secondary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--border-radius-md);
+  padding: 12px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.button-group {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+button {
+  padding: 8px 16px;
+  background: var(--color-background-primary);
+  border: 0.5px solid var(--color-border-secondary);
+  border-radius: var(--border-radius-md);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+button:hover {
+  background: var(--color-background-secondary);
+  border-color: var(--color-border-primary);
+}
+
+button:active {
+  transform: scale(0.98);
+}
+</style>
+</head>
+<body>
+
+<div id="gameContainer">
+  <canvas id="canvas" width="680" height="500"></canvas>
+  
+  <div id="hud">
+    <div class="stat-card">
+      <div class="stat-label">Speed</div>
+      <div class="stat-value"><span id="speed">0</span><span class="stat-unit">km/h</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Lap Time</div>
+      <div class="stat-value"><span id="lapTime">0:00</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Best Lap</div>
+      <div class="stat-value"><span id="bestLap">—</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Position</div>
+      <div class="stat-value"><span id="position">1</span><span class="stat-unit">/8</span></div>
+    </div>
+  </div>
+
+  <div id="controls">
+    ⬆️ Forward | ⬇️ Brake | ⬅️ Left | ➡️ Right
+    <div class="button-group">
+      <button onclick="resetGame()">Reset Race</button>
+      <button onclick="togglePause()">Pause</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// Game variables
+const game = {
+  paused: false,
+  gameTime: 0,
+  lapStartTime: 0,
+  bestLapTime: null,
+  laps: 0
+};
+
+// Player car
+const player = {
+  x: 340,
+  y: 420,
+  width: 20,
+  height: 30,
+  angle: -Math.PI / 2,
+  speed: 0,
+  maxSpeed: 8,
+  acceleration: 0.15,
+  friction: 0.92,
+  rotationSpeed: 0.08,
+  crossFinish: false
+};
+
+// AI cars
+const aiCars = [];
+
+function createAICar(x, y, offsetSpeed = 0) {
+  return {
+    x: x,
+    y: y,
+    width: 20,
+    height: 30,
+    angle: -Math.PI / 2,
+    speed: 3 + offsetSpeed,
+    targetSpeed: 3 + offsetSpeed,
+    friction: 0.92
+  };
+}
+
+// Initialize AI cars
+for (let i = 0; i < 3; i++) {
+  aiCars.push(createAICar(280 + i * 50, 350 - i * 60, i * 0.3));
+}
+
+// Keyboard input
+const keys = {};
+window.addEventListener('keydown', (e) => {
+  keys[e.key.toLowerCase()] = true;
+});
+window.addEventListener('keyup', (e) => {
+  keys[e.key.toLowerCase()] = false;
+});
+
+function updatePlayer() {
+  // Acceleration
+  if (keys['arrowup'] || keys['w']) {
+    player.speed = Math.min(player.speed + player.acceleration, player.maxSpeed);
+  } else if (keys['arrowdown'] || keys['s']) {
+    player.speed = Math.max(player.speed - player.acceleration * 1.5, -2);
+  } else {
+    player.speed *= player.friction;
+  }
+
+  // Rotation
+  if (keys['arrowleft'] || keys['a']) {
+    player.angle -= player.rotationSpeed;
+  }
+  if (keys['arrowright'] || keys['d']) {
+    player.angle += player.rotationSpeed;
+  }
+
+  // Move
+  player.x += Math.cos(player.angle) * player.speed;
+  player.y += Math.sin(player.angle) * player.speed;
+
+  // Boundary collision
+  const boundary = 30;
+  if (player.x < boundary) player.x = boundary;
+  if (player.x > canvas.width - boundary) player.x = canvas.width - boundary;
+  if (player.y < boundary) player.y = boundary;
+  if (player.y > canvas.height - boundary) player.y = canvas.height - boundary;
+}
+
+function updateAICars() {
+  aiCars.forEach((car) => {
+    // Simple waypoint following
+    let targetY = Math.sin(game.gameTime * 0.002) * 80 + 250;
+    let targetX = Math.cos(game.gameTime * 0.001) * 150 + 340;
+
+    let dx = targetX - car.x;
+    let dy = targetY - car.y;
+    let distance = Math.sqrt(dx * dx + dy * dy);
+
+    if (distance > 10) {
+      car.angle = Math.atan2(dy, dx);
+    }
+
+    car.speed = car.targetSpeed;
+    car.x += Math.cos(car.angle) * car.speed;
+    car.y += Math.sin(car.angle) * car.speed;
+
+    // Boundary check
+    if (car.x < 30 || car.x > canvas.width - 30 || car.y < 30 || car.y > canvas.height - 30) {
+      car.x = 340;
+      car.y = 200;
+    }
+  });
+}
+
+function drawTrack() {
+  // Track background
+  ctx.fillStyle = '#2d6a3d';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Road
+  ctx.fillStyle = '#444';
+  ctx.beginPath();
+  ctx.ellipse(canvas.width / 2, 250, 200, 150, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Lane markers
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([20, 15]);
+  ctx.beginPath();
+  ctx.ellipse(canvas.width / 2, 250, 150, 100, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Finish line
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.fillRect(canvas.width / 2 - 120, 480, 240, 15);
+  
+  for (let i = 0; i < 12; i++) {
+    ctx.fillStyle = i % 2 === 0 ? '#fff' : '#000';
+    ctx.fillRect(canvas.width / 2 - 120 + i * 20, 480, 20, 15);
+  }
+
+  // Track borders
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.ellipse(canvas.width / 2, 250, 230, 170, 0, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function drawCar(car) {
+  ctx.save();
+  ctx.translate(car.x, car.y);
+  ctx.rotate(car.angle + Math.PI / 2);
+
+  // Car body
+  ctx.fillStyle = car === player ? '#ff6b6b' : '#4ecdc4';
+  ctx.fillRect(-car.width / 2, -car.height / 2, car.width, car.height);
+
+  // Car window
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(-car.width / 2 + 2, -car.height / 2 + 4, car.width - 4, 8);
+
+  // Headlights
+  ctx.fillStyle = '#ffff00';
+  ctx.fillRect(-car.width / 2 + 3, -car.height / 2, 4, 4);
+  ctx.fillRect(car.width / 2 - 7, -car.height / 2, 4, 4);
+
+  ctx.restore();
+}
+
+function checkFinishLine() {
+  const finishY = 487;
+  if (player.y > finishY && !player.crossFinish) {
+    player.crossFinish = true;
+    game.laps++;
+    
+    if (game.lapStartTime > 0) {
+      const lapTime = game.gameTime - game.lapStartTime;
+      if (game.bestLapTime === null || lapTime < game.bestLapTime) {
+        game.bestLapTime = lapTime;
+      }
+    }
+    game.lapStartTime = game.gameTime;
+  } else if (player.y < finishY) {
+    player.crossFinish = false;
+  }
+}
+
+function getPlayerPosition() {
+  let position = 1;
+  aiCars.forEach(car => {
+    if (car.y < player.y) {
+      position++;
+    }
+  });
+  return position;
+}
+
+function formatTime(ms) {
+  const seconds = Math.floor(ms / 1000);
+  const millis = Math.floor((ms % 1000) / 10);
+  const mins = Math.floor(seconds / 60);
+  return `${mins}:${(seconds % 60).toString().padStart(2, '0')}`;
+}
+
+function updateHUD() {
+  document.getElementById('speed').textContent = Math.round(Math.abs(player.speed) * 15);
+  document.getElementById('position').textContent = getPlayerPosition();
+  
+  const currentLapTime = game.gameTime - game.lapStartTime;
+  document.getElementById('lapTime').textContent = formatTime(currentLapTime);
+  
+  if (game.bestLapTime !== null) {
+    document.getElementById('bestLap').textContent = formatTime(game.bestLapTime);
+  }
+}
+
+function resetGame() {
+  game.gameTime = 0;
+  game.lapStartTime = 0;
+  game.bestLapTime = null;
+  game.laps = 0;
+  
+  player.x = 340;
+  player.y = 420;
+  player.angle = -Math.PI / 2;
+  player.speed = 0;
+  
+  aiCars.forEach((car, i) => {
+    car.x = 280 + i * 50;
+    car.y = 350 - i * 60;
+    car.angle = -Math.PI / 2;
+    car.speed = 3 + i * 0.3;
+  });
+}
+
+function togglePause() {
+  game.paused = !game.paused;
+  document.querySelector('button:nth-child(2)').textContent = game.paused ? 'Resume' : 'Pause';
+}
+
+function gameLoop() {
+  if (!game.paused) {
+    game.gameTime += 16;
+    updatePlayer();
+    updateAICars();
+    checkFinishLine();
+  }
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawTrack();
+  
+  aiCars.forEach(drawCar);
+  drawCar(player);
+
+  updateHUD();
+  requestAnimationFrame(gameLoop);
+}
+
+resetGame();
+gameLoop();
+</script>
+
+</body>
+</html>
