@@ -1,0 +1,367 @@
+<html>
+<head>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,sans-serif;background:#0f0f1e;color:#fff}
+#game-wrapper{width:100%;max-width:1200px;margin:0 auto;padding:12px}
+#main-container{display:grid;grid-template-columns:1fr 280px;gap:16px}
+#canvas-container{background:#1a1a2e;border:2px solid #16213e;border-radius:12px;padding:8px;box-shadow:0 0 30px rgba(0,255,150,0.1)}
+canvas{width:100%;display:block;border-radius:8px;background:#0a0a15}
+#dashboard{display:flex;flex-direction:column;gap:12px}
+.dash-card{background:#16213e;border:1px solid #0f3460;border-radius:10px;padding:12px;color:#00ff96}
+.dash-title{font-size:12px;font-weight:bold;color:#00d4ff;text-transform:uppercase;margin-bottom:8px;border-bottom:1px solid #0f3460;padding-bottom:6px}
+.stat{display:flex;justify-content:space-between;margin:6px 0;font-size:12px}
+.stat-val{color:#00ff96;font-weight:bold}
+.bar{width:100%;height:4px;background:#0f3460;border-radius:2px;margin:4px 0;overflow:hidden}
+.bar-fill{height:100%;background:linear-gradient(90deg,#00ff96,#00d4ff);width:70%}
+.leaderboard{list-style:none}
+.leaderboard-item{padding:6px;border-bottom:1px solid #0f3460;font-size:11px;display:flex;gap:4px}
+.leaderboard-item.player{background:#0f3460;color:#00ff96;border-left:3px solid #00ff96}
+.rank{min-width:20px;font-weight:bold;color:#00d4ff}
+.name{flex:1}
+.time{color:#888}
+button{width:100%;padding:8px;margin:4px 0;background:linear-gradient(135deg,#00ff96,#00d4ff);color:#000;border:none;border-radius:6px;font-weight:bold;cursor:pointer;font-size:11px}
+button:hover{opacity:0.9;transform:scale(1.02)}
+.controls-info{font-size:10px;color:#888;padding:8px;background:#0f3460;border-radius:6px;margin-top:8px}
+</style>
+</head>
+<body>
+
+<div id="game-wrapper">
+  <div id="main-container">
+    <div id="canvas-container">
+      <canvas id="raceCanvas" width="760" height="520"></canvas>
+    </div>
+    
+    <div id="dashboard">
+      <div class="dash-card">
+        <div class="dash-title">Race Info</div>
+        <div class="stat">
+          <span>Lap:</span>
+          <span class="stat-val" id="lap">1/5</span>
+        </div>
+        <div class="stat">
+          <span>Position:</span>
+          <span class="stat-val" id="position">1st</span>
+        </div>
+        <div class="stat">
+          <span>Time:</span>
+          <span class="stat-val" id="raceTime">00:00</span>
+        </div>
+      </div>
+
+      <div class="dash-card">
+        <div class="dash-title">Car Status</div>
+        <div class="stat">
+          <span>Speed:</span>
+          <span class="stat-val" id="speed">0</span>
+          <span style="font-size:10px">km/h</span>
+        </div>
+        <div><span style="font-size:10px">Engine Health</span>
+          <div class="bar"><div class="bar-fill" id="health-bar"></div></div>
+        </div>
+        <div><span style="font-size:10px">Fuel</span>
+          <div class="bar"><div class="bar-fill" id="fuel-bar" style="background:linear-gradient(90deg,#ff9800,#ff5722)"></div></div>
+        </div>
+        <div><span style="font-size:10px">Tire Grip</span>
+          <div class="bar"><div class="bar-fill" id="tire-bar" style="background:linear-gradient(90deg,#ffeb3b,#8bc34a)"></div></div>
+        </div>
+      </div>
+
+      <div class="dash-card">
+        <div class="dash-title">Lap Times</div>
+        <div class="stat">
+          <span>Current:</span>
+          <span class="stat-val" id="currentLap">-:-</span>
+        </div>
+        <div class="stat">
+          <span>Best:</span>
+          <span class="stat-val" id="bestLap">-:-</span>
+        </div>
+      </div>
+
+      <div class="dash-card">
+        <div class="dash-title">Leaderboard</div>
+        <ul class="leaderboard" id="leaderboard"></ul>
+      </div>
+
+      <button onclick="resetRace()">Reset Race</button>
+      <button id="pauseBtn" onclick="togglePause()">Pause</button>
+
+      <div class="controls-info">
+        <strong>Controls:</strong><br>
+        ↑ Accel | ↓ Brake | ← → Steer<br>
+        Space = Drift | P = Pause
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('raceCanvas');
+const ctx = canvas.getContext('2d');
+
+const race = {
+  time: 0,
+  paused: false,
+  lap: 1,
+  totalLaps: 5,
+  lapStartTime: 0,
+  bestLapTime: Infinity,
+  currentLapTime: 0
+};
+
+const player = {
+  x: 100,
+  y: 400,
+  vx: 0,
+  vy: 0,
+  angle: 0,
+  speed: 0,
+  maxSpeed: 6,
+  accel: 0.15,
+  friction: 0.96,
+  width: 14,
+  height: 24,
+  health: 100,
+  fuel: 100,
+  tireGrip: 100,
+  drifting: false,
+  crossedFinish: false
+};
+
+const cars = [
+  { x:130, y:420, name:'RedRacer', speed:0, angle:0, color:'#ff4444', finished:false },
+  { x:70, y:420, name:'BlueWind', speed:0, angle:0, color:'#4488ff', finished:false },
+  { x:160, y:420, name:'GreenSpeed', speed:0, angle:0, color:'#44ff44', finished:false },
+  { x:40, y:420, name:'YellowKing', speed:0, angle:0, color:'#ffff44', finished:false },
+  { x:190, y:420, name:'PurpleX', speed:0, angle:0, color:'#ff44ff', finished:false },
+  { x:10, y:420, name:'CyanRush', speed:0, angle:0, color:'#44ffff', finished:false },
+  { x:220, y:420, name:'OrangeMax', speed:0, angle:0, color:'#ff8844', finished:false }
+];
+
+const trackPoints = [
+  {x:100,y:420},{x:100,y:250},{x:200,y:150},{x:400,y:130},
+  {x:600,y:200},{x:650,y:350},{x:600,y:480},{x:400,y:500},
+  {x:200,y:480}
+];
+
+const keys = {};
+window.addEventListener('keydown',e=>{
+  keys[e.key.toLowerCase()]=true;
+  if(e.key.toLowerCase()==='p')togglePause();
+  if(e.key===' ')player.drifting=true;
+});
+window.addEventListener('keyup',e=>{
+  keys[e.key.toLowerCase()]=false;
+  if(e.key===' ')player.drifting=false;
+});
+
+function updatePlayer(){
+  if(keys['arrowup']||keys['w']) player.vx+=Math.cos(player.angle)*player.accel;
+  if(keys['arrowdown']||keys['s']) player.vx-=Math.cos(player.angle)*player.accel*0.6;
+  if(keys['arrowleft']||keys['a']) player.angle-=0.1;
+  if(keys['arrowright']||keys['d']) player.angle+=0.1;
+
+  player.speed=Math.sqrt(player.vx*player.vx+player.vy*player.vy);
+  if(player.speed>player.maxSpeed){player.speed=player.maxSpeed;}
+  
+  player.vx*=player.friction;
+  player.vy*=player.friction;
+  
+  if(player.drifting){
+    player.tireGrip-=0.5;
+    player.angle+=0.05*(player.vx*0.1);
+  }
+
+  player.x+=Math.cos(player.angle)*player.speed;
+  player.y+=Math.sin(player.angle)*player.speed;
+  
+  player.fuel=Math.max(0,player.fuel-0.08);
+  player.tireGrip=Math.min(100,player.tireGrip+0.3);
+
+  if(player.x<20)player.x=20;
+  if(player.x>740)player.x=740;
+  if(player.y<20)player.y=20;
+  if(player.y>500)player.y=500;
+}
+
+function updateCars(){
+  cars.forEach(car=>{
+    let targetIdx=Math.floor(race.time/400)%trackPoints.length;
+    let target=trackPoints[targetIdx];
+    let dx=target.x-car.x;
+    let dy=target.y-car.y;
+    let dist=Math.sqrt(dx*dx+dy*dy);
+    
+    car.angle=Math.atan2(dy,dx);
+    car.speed=Math.min(car.speed+0.08,5);
+    car.x+=Math.cos(car.angle)*car.speed;
+    car.y+=Math.sin(car.angle)*car.speed;
+    
+    if(car.x<20)car.x=20;
+    if(car.x>740)car.x=740;
+    if(car.y<20)car.y=20;
+    if(car.y>500)car.y=500;
+  });
+}
+
+function drawTrack(){
+  ctx.fillStyle='#0a2a1a';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  
+  ctx.strokeStyle='#44ff44';
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.moveTo(trackPoints[0].x,trackPoints[0].y);
+  for(let p of trackPoints) ctx.lineTo(p.x,p.y);
+  ctx.closePath();
+  ctx.stroke();
+  
+  ctx.strokeStyle='#ffff44';
+  ctx.setLineDash([10,10]);
+  ctx.lineWidth=2;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  
+  ctx.fillStyle='rgba(255,255,68,0.2)';
+  ctx.fillRect(80,420,40,20);
+  ctx.fillStyle='#ffff00';
+  ctx.font='bold 10px Arial';
+  ctx.fillText('FINISH',90,432);
+  
+  for(let i=0;i<trackPoints.length-1;i++){
+    let p1=trackPoints[i];
+    let p2=trackPoints[i+1];
+    let mx=(p1.x+p2.x)/2;
+    let my=(p1.y+p2.y)/2;
+    ctx.fillStyle='rgba(68,255,68,0.1)';
+    ctx.fillRect(mx-30,my-30,60,60);
+  }
+}
+
+function drawCar(car,isPlayer=false){
+  ctx.save();
+  ctx.translate(car.x,car.y);
+  ctx.rotate(car.angle);
+  
+  ctx.fillStyle=isPlayer?'#00ff96':car.color;
+  ctx.fillRect(-car.width/2,-car.height/2,car.width,car.height);
+  
+  ctx.fillStyle='rgba(0,0,0,0.4)';
+  ctx.fillRect(-car.width/2+2,-car.height/2+4,car.width-4,6);
+  
+  ctx.fillStyle='#ffff00';
+  ctx.fillRect(-car.width/2+1,-car.height/2-1,3,2);
+  ctx.fillRect(car.width/2-4,-car.height/2-1,3,2);
+  
+  if(isPlayer&&player.drifting){
+    ctx.strokeStyle='rgba(255,0,255,0.5)';
+    ctx.lineWidth=1;
+    ctx.beginPath();
+    ctx.arc(0,0,20,0,Math.PI*2);
+    ctx.stroke();
+  }
+  
+  ctx.restore();
+}
+
+function drawSpeed(){
+  ctx.fillStyle='#00ff96';
+  ctx.font='bold 14px Arial';
+  ctx.fillText('SPD: '+Math.round(player.speed*20),20,30);
+  
+  if(player.fuel<20)ctx.fillStyle='#ff4444';
+  else ctx.fillStyle='#ffaa00';
+  ctx.fillText('FUEL: '+Math.round(player.fuel),20,50);
+}
+
+function checkFinish(){
+  if(Math.abs(player.x-100)<40&&Math.abs(player.y-420)<30&&!player.crossedFinish){
+    player.crossedFinish=true;
+    if(race.lap<race.totalLaps){race.lap++;}
+    race.currentLapTime=race.time-race.lapStartTime;
+    if(race.currentLapTime<race.bestLapTime){race.bestLapTime=race.currentLapTime;}
+    race.lapStartTime=race.time;
+  }
+  if(Math.abs(player.y-420)>100)player.crossedFinish=false;
+}
+
+function updateLeaderboard(){
+  let positions=[{name:'You',time:race.time,isPlayer:true}];
+  cars.forEach(car=>{
+    positions.push({name:car.name,time:race.time-100+Math.random()*200,isPlayer:false});
+  });
+  positions.sort((a,b)=>a.time-b.time);
+  
+  let lb=document.getElementById('leaderboard');
+  lb.innerHTML=positions.map((p,i)=>`
+    <li class="leaderboard-item ${p.isPlayer?'player':''}">
+      <span class="rank">${i+1}</span>
+      <span class="name">${p.name}</span>
+    </li>
+  `).join('');
+}
+
+function updateUI(){
+  const sec=Math.floor(race.time/1000);
+  const min=Math.floor(sec/60);
+  document.getElementById('raceTime').textContent=min+':'+(sec%60).toString().padStart(2,'0');
+  document.getElementById('lap').textContent=race.lap+'/'+race.totalLaps;
+  document.getElementById('speed').textContent=Math.round(player.speed*20);
+  document.getElementById('position').textContent='1st';
+  
+  document.getElementById('health-bar').style.width=player.health+'%';
+  document.getElementById('fuel-bar').style.width=player.fuel+'%';
+  document.getElementById('tire-bar').style.width=player.tireGrip+'%';
+  
+  if(race.currentLapTime>0){
+    let s=Math.floor(race.currentLapTime/1000);
+    document.getElementById('currentLap').textContent=Math.floor(s/60)+':'+(s%60).toString().padStart(2,'0');
+  }
+  if(race.bestLapTime<Infinity){
+    let s=Math.floor(race.bestLapTime/1000);
+    document.getElementById('bestLap').textContent=Math.floor(s/60)+':'+(s%60).toString().padStart(2,'0');
+  }
+  
+  updateLeaderboard();
+}
+
+function resetRace(){
+  race.time=0;
+  race.lap=1;
+  race.lapStartTime=0;
+  race.bestLapTime=Infinity;
+  player.x=100;player.y=400;player.vx=0;player.vy=0;
+  player.speed=0;player.health=100;player.fuel=100;player.tireGrip=100;
+  cars.forEach(car=>{car.x=100+Math.random()*100;car.y=420+Math.random()*30;car.speed=0;});
+}
+
+function togglePause(){
+  race.paused=!race.paused;
+  document.getElementById('pauseBtn').textContent=race.paused?'Resume':'Pause';
+}
+
+function gameLoop(){
+  if(!race.paused){
+    race.time+=16;
+    updatePlayer();
+    updateCars();
+    checkFinish();
+  }
+  
+  drawTrack();
+  cars.forEach(car=>drawCar(car));
+  drawCar(player,true);
+  drawSpeed();
+  updateUI();
+  
+  requestAnimationFrame(gameLoop);
+}
+
+resetRace();
+gameLoop();
+</script>
+
+</body>
+</html>
